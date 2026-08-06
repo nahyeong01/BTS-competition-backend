@@ -10,7 +10,7 @@ class CourseCreate(BaseModel):
     course_name: str
     trip_start: str
     trip_end: str
-    proc_id: int
+    proc_id: str
 
 class CourseUpdate(BaseModel):
     course_name: Optional[str] = None
