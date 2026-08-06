@@ -124,3 +124,44 @@ def add_course_details(
     ]
     response = supabase.table("course_detail").insert(rows).execute()
     return response.data
+
+    # ==================== 공개 코스 ====================
+@router.get("/api/shared-courses")
+def get_shared_courses():
+    response = supabase.table("course")\
+        .select("course_id, course_name, trip_start, trip_end, user_id, source_course_id, root_course_id, published_at, created_at")\
+        .eq("visibility", "public")\
+        .order("published_at", desc=True)\
+        .execute()
+    return response.data
+
+@router.patch("/api/courses/{course_id}/publish")
+def publish_course(course_id: int, current_user = Depends(get_current_user)):
+    from datetime import datetime, timezone
+    user_id = current_user.id
+    response = supabase.table("course")\
+        .update({
+            "visibility": "public",
+            "published_at": datetime.now(timezone.utc).isoformat()
+        })\
+        .eq("course_id", course_id)\
+        .eq("user_id", user_id)\
+        .execute()
+    if not response.data:
+        raise HTTPException(status_code=404, detail="코스를 찾을 수 없습니다")
+    return {"status": "ok", "message": "코스가 공개됐습니다"}
+
+@router.patch("/api/courses/{course_id}/unpublish")
+def unpublish_course(course_id: int, current_user = Depends(get_current_user)):
+    user_id = current_user.id
+    response = supabase.table("course")\
+        .update({
+            "visibility": "private",
+            "published_at": None
+        })\
+        .eq("course_id", course_id)\
+        .eq("user_id", user_id)\
+        .execute()
+    if not response.data:
+        raise HTTPException(status_code=404, detail="코스를 찾을 수 없습니다")
+    return {"status": "ok", "message": "코스가 비공개됐습니다"}
