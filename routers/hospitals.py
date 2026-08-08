@@ -5,13 +5,15 @@ router = APIRouter()
 
 @router.get("/api/hospitals")
 def get_hospitals():
-    response = supabase.table("hospital").select("*").execute()
+    response = supabase.table("hospital")\
+        .select("*, hospital_dept(medi_dept_id), hospital_procedure(proc_id)")\
+        .execute()
     return response.data
 
 @router.get("/api/hospitals/{hosp_id}")
 def get_hospital(hosp_id: str):
     response = supabase.table("hospital")\
-        .select("*")\
+        .select("*, hospital_dept(medi_dept_id), hospital_procedure(proc_id)")\
         .eq("hosp_id", hosp_id)\
         .execute()
     if not response.data:
