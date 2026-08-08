@@ -1,0 +1,13 @@
+[1mdiff --git a/routers/courses.py b/routers/courses.py[m
+[1mindex d517808..7eee67e 100644[m
+[1m--- a/routers/courses.py[m
+[1m+++ b/routers/courses.py[m
+[36m@@ -10,7 +10,7 @@[m [mclass CourseCreate(BaseModel):[m
+     course_name: str[m
+     trip_start: str[m
+     trip_end: str[m
+[31m-    proc_id: int[m
+[32m+[m[32m    proc_id: str[m
+ [m
+ class CourseUpdate(BaseModel):[m
+     course_name: Optional[str] = None[m
