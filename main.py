@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from database import supabase
 from routers import auth, hospitals, accommodations, tourist_spots, procedures, wishlist, courses
 from routers import translations
+from routers import risk
 
 
 app = FastAPI()
@@ -9,11 +10,13 @@ app = FastAPI()
 app.include_router(auth.router)
 app.include_router(hospitals.router)
 app.include_router(accommodations.router)
+app.include_router(risk.router)          # ← tourist_spots보다 먼저 등록
 app.include_router(tourist_spots.router)
 app.include_router(procedures.router)
 app.include_router(wishlist.router)
 app.include_router(courses.router)
 app.include_router(translations.router)
+
 
 @app.get("/")
 def health_check():
