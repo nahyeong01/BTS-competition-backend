@@ -133,7 +133,55 @@ def get_shared_courses():
         .eq("visibility", "public")\
         .order("published_at", desc=True)\
         .execute()
-    return response.data
+    courses = response.data
+    if not courses:
+        return []
+
+    # user_id마다 별도 쿼리를 반복하지 않도록, 이 목록에 등장하는 user_id를 한 번에
+    # 모아서 profiles를 한 번만 조회한 뒤 파이썬에서 매칭한다.
+    user_ids = list({c["user_id"] for c in courses if c.get("user_id")})
+    nickname_by_user_id = {}
+    if user_ids:
+        profiles_res = supabase.table("profiles")\
+            .select("user_id, nickname")\
+            .in_("user_id", user_ids)\
+            .execute()
+        nickname_by_user_id = {p["user_id"]: p["nickname"] for p in profiles_res.data}
+
+    for c in courses:
+        c["nickname"] = nickname_by_user_id.get(c["user_id"])
+    return courses
+
+@router.get("/api/shared-courses/{course_id}")
+def get_shared_course_detail(course_id: int):
+    """공개된(visibility=public) 코스라면, 작성자 본인이 아니어도 상세(Day별 관광지
+    목록 + 작성자 닉네임)를 조회할 수 있다. get_course()와 달리 user_id로 필터링하지
+    않는다 - "다른 사람이 만든 추천코스"를 보는 화면이 이 엔드포인트를 쓴다."""
+    course = supabase.table("course")\
+        .select("*")\
+        .eq("course_id", course_id)\
+        .eq("visibility", "public")\
+        .execute()
+    if not course.data:
+        raise HTTPException(status_code=404, detail="공개된 코스를 찾을 수 없습니다")
+
+    result = course.data[0]
+
+    details = supabase.table("course_detail")\
+        .select("*")\
+        .eq("course_id", course_id)\
+        .order("day")\
+        .order("visit_order")\
+        .execute()
+    result["details"] = details.data
+
+    profile = supabase.table("profiles")\
+        .select("nickname")\
+        .eq("user_id", result["user_id"])\
+        .execute()
+    result["nickname"] = profile.data[0]["nickname"] if profile.data else None
+
+    return result
 
 @router.patch("/api/courses/{course_id}/publish")
 def publish_course(course_id: int, current_user = Depends(get_current_user)):
