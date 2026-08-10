@@ -38,7 +38,7 @@ def create_or_get_session(current_user = Depends(get_current_user)):
         supabase.table("profiles").insert({
             "user_id": user_id,
             "nickname": nickname,
-            "nation_id": "KR",
+            "nation_id": "KOR",
         }).execute()
         return {"status": "created", "message": "프로필 생성됨"}
     return {"status": "ok", "message": "기존 프로필 있음"}
