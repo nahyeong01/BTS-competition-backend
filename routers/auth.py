@@ -1,3 +1,4 @@
+import random
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
@@ -5,6 +6,35 @@ from database import supabase
 from auth import get_current_user
 
 router = APIRouter()
+
+# 프론트 utils/publicAlias.js의 ALIAS_CODE_CHARS/ALIAS_CODE_LENGTH/ALIAS_TOKEN_PREFIX와
+# 반드시 동일하게 유지해야 한다 - 여기서 만든 "alias:XXXX" 토큰을 프론트가 그대로
+# formatAuthorDisplay()로 감싸서 "여행자 XXXX" 형태로 보여주기 때문. 0/O, 1/I처럼
+# 혼동되는 문자는 제외한다.
+ALIAS_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+ALIAS_CODE_LENGTH = 4
+ALIAS_TOKEN_PREFIX = "alias:"
+ALIAS_GENERATION_MAX_ATTEMPTS = 5
+
+
+def _generate_alias_code() -> str:
+    return "".join(random.choice(ALIAS_CODE_CHARS) for _ in range(ALIAS_CODE_LENGTH))
+
+
+def generate_unique_alias_nickname() -> str:
+    """profiles.nickname에 저장할 "alias:XXXX" 토큰을 생성한다. 이메일/구글 실명/기존
+    nickname 등 개인정보를 재료로 쓰지 않고 무작위로만 만든다(publicAlias.js와 동일 원칙).
+    충돌 가능성은 4자리(33^4 ≈ 130만 가지)라 낮지만, 여러 번 시도해도 계속 겹치면 마지막
+    후보를 그대로 쓴다(가입 자체가 막히는 것보다 훨씬 낫다)."""
+    for _ in range(ALIAS_GENERATION_MAX_ATTEMPTS):
+        candidate = f"{ALIAS_TOKEN_PREFIX}{_generate_alias_code()}"
+        existing = supabase.table("profiles")\
+            .select("user_id")\
+            .eq("nickname", candidate)\
+            .execute()
+        if not existing.data:
+            return candidate
+    return candidate
 
 class ProfileUpdate(BaseModel):
     nickname: Optional[str] = None
@@ -34,7 +64,10 @@ def create_or_get_session(current_user = Depends(get_current_user)):
         .eq("user_id", user_id)\
         .execute()
     if not existing.data:
-        nickname = current_user.user_metadata.get("full_name", "사용자")
+        # 구글 user_metadata의 full_name(실명)은 절대 저장하지 않는다 - 신규 가입 시
+        # 서버가 직접 "alias:XXXX" 익명 토큰을 생성해 영구 저장한다. 프론트는 이 값을
+        # 그대로 받아 formatAuthorDisplay()로 "여행자 XXXX" 형태로만 화면에 보여준다.
+        nickname = generate_unique_alias_nickname()
         supabase.table("profiles").insert({
             "user_id": user_id,
             "nickname": nickname,
