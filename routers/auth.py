@@ -74,8 +74,17 @@ def create_or_get_session(current_user = Depends(get_current_user)):
             "nickname": nickname,
             "nation_id": "KOR",
         }).execute()
-        return {"status": "created", "message": "프로필 생성됨"}
-    return {"status": "ok", "message": "기존 프로필 있음"}
+        return {"status": "created", "message": "프로필 생성됨", "age_verified": False}
+    # 신규 가입 시점에 profiles 행은 바로 생기지만, 온보딩(AgeVerification/TermsAgreement)을
+    # 끝까지 마치지 않고 이탈했을 수 있다 - 그 경우 age_verified가 여전히 false로 남아있다.
+    # 프론트가 status만으로 판정하면 이런 유저는 다음 로그인부터 "기존 유저"로 취급돼
+    # 온보딩을 영원히 다시 안 보게 되므로, 기존 유저 응답에도 age_verified를 함께 내려줘
+    # 프론트가 status와 별개로 온보딩 완료 여부를 판단할 수 있게 한다.
+    return {
+        "status": "ok",
+        "message": "기존 프로필 있음",
+        "age_verified": existing.data[0].get("age_verified", False),
+    }
 
 @router.patch("/api/auth/me")
 def update_my_profile(
