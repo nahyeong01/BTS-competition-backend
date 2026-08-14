@@ -1,4 +1,5 @@
 import random
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
@@ -98,3 +99,11 @@ def logout(current_user = Depends(get_current_user)):
     except Exception:
         pass
     return {"status": "ok", "message": "로그아웃 완료"}
+
+@router.patch("/api/auth/onboarding")
+def complete_onboarding(current_user = Depends(get_current_user)):
+    supabase.table("profiles").update({
+        "age_verified": True,
+        "terms_agreed_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("user_id", current_user.id).execute()
+    return {"status": "ok"}
