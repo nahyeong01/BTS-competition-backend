@@ -1,12 +1,10 @@
 import random
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
-from database import supabase, supabase_admin   # supabase_admin 추가로 import
 from pydantic import BaseModel
 from typing import Optional
-from database import supabase
+from database import supabase, supabase_admin
 from auth import get_current_user
-from database import supabase, supabase_admin   # supabase_admin import 추가
 
 
 router = APIRouter()
