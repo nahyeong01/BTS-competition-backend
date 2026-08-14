@@ -3,6 +3,8 @@ from database import supabase
 from routers import auth, hospitals, accommodations, tourist_spots, procedures, wishlist, courses
 from routers import translations
 from routers import risk
+from routers import reports
+
 
 
 app = FastAPI()
@@ -16,6 +18,7 @@ app.include_router(procedures.router)
 app.include_router(wishlist.router)
 app.include_router(courses.router)
 app.include_router(translations.router)
+app.include_router(reports.router)
 
 
 @app.get("/")
