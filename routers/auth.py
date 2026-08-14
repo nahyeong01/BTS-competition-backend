@@ -1,10 +1,13 @@
 import random
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
+from database import supabase, supabase_admin   # supabase_admin 추가로 import
 from pydantic import BaseModel
 from typing import Optional
 from database import supabase
 from auth import get_current_user
+from database import supabase, supabase_admin   # supabase_admin import 추가
+
 
 router = APIRouter()
 
@@ -116,3 +119,45 @@ def complete_onboarding(current_user = Depends(get_current_user)):
         "terms_agreed_at": datetime.now(timezone.utc).isoformat(),
     }).eq("user_id", current_user.id).execute()
     return {"status": "ok"}
+
+@router.delete("/api/auth/me")
+def delete_my_account(current_user = Depends(get_current_user)):
+    user_id = current_user.id
+
+    # profiles를 참조하는 FK가 하나도 없어서(user_id 컬럼만 있고 실제 FK 제약은 없음)
+    # CASCADE에 기댈 수 없다 - 이 유저 소유 데이터를 테이블별로 직접 지운다.
+    # course만 예외적으로 순서가 중요하다:
+    #   - course -> course_detail, course_wishlist는 CASCADE라 course 삭제 시 자동 정리됨
+    #   - course -> course_report는 NO ACTION이라, 이 유저 코스가 신고당한 적 있으면
+    #     course_report 행을 먼저 지워야 course 삭제가 안 막힌다
+    #   - course.source_course_id/root_course_id(자기참조)도 NO ACTION이라, 다른 유저가
+    #     이 유저의 코스를 원본으로 저장/재공유했다면 그 참조를 먼저 끊어야(NULL 처리)
+    #     course 삭제가 안 막힌다. 참조하는 다른 유저의 코스 자체를 지우면 안 되므로
+    #     삭제가 아니라 NULL로 끊는다.
+    own_courses = supabase.table("course").select("course_id").eq("user_id", user_id).execute()
+    own_course_ids = [row["course_id"] for row in own_courses.data]
+
+    if own_course_ids:
+        supabase.table("course_report").delete().in_("course_id", own_course_ids).execute()
+        supabase.table("course").update({"source_course_id": None}).in_("source_course_id", own_course_ids).execute()
+        supabase.table("course").update({"root_course_id": None}).in_("root_course_id", own_course_ids).execute()
+
+    # 나머지 소유 데이터 삭제 (하위 참조 없어 순서 상관없음)
+    supabase.table("accommodation_wishlist").delete().eq("user_id", user_id).execute()
+    supabase.table("hospital_wishlist").delete().eq("user_id", user_id).execute()
+    supabase.table("tourist_wishlist").delete().eq("user_id", user_id).execute()
+    supabase.table("course_wishlist").delete().eq("user_id", user_id).execute()
+
+    # course 삭제 - course_detail/course_wishlist는 CASCADE라 자동 정리됨
+    supabase.table("course").delete().eq("user_id", user_id).execute()
+
+    # profiles 삭제
+    supabase.table("profiles").delete().eq("user_id", user_id).execute()
+
+    # Supabase Auth 계정 자체 삭제 - service_role(Secret key) 클라이언트로만 가능
+    try:
+        supabase_admin.auth.admin.delete_user(user_id)
+    except Exception as e:
+        print(f"Auth 계정 삭제 실패 (user_id={user_id}): {e}")
+
+    return {"status": "ok", "message": "탈퇴 완료"}
