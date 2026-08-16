@@ -3,7 +3,7 @@ from database import supabase
 
 router = APIRouter()
 
-VALID_ENTITY_TYPES = ["hospital", "tourist", "accommodation"]
+VALID_ENTITY_TYPES = ["hospital", "tourist", "accommodation", "after_caution_tag"]
 
 
 @router.get("/api/translations/{entity_type}/{entity_id}")
