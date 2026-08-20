@@ -37,6 +37,6 @@ def report_course(course_id: int, body: ReportCreate, current_user = Depends(get
         "course_id": course_id,
         "reporter_user_id": current_user.id,
         "report_reason": body.report_reason,
-        "status": "pending",
+        "status": "PENDING",
     }).execute()
     return {"status": "created"}
