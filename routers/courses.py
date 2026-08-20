@@ -183,6 +183,62 @@ def get_shared_course_detail(course_id: int):
 
     return result
 
+@router.post("/api/shared-courses/{course_id}/copy")
+def copy_shared_course(course_id: int, current_user = Depends(get_current_user)):
+    """공개 코스를 로그인한 사용자의 "내 코스"로 복사한다. 원작성자의 개인정보
+    (trip_start/trip_end/proc_id)는 가져오지 않고, 관광지 목록(day/visit_order)만
+    복사한다 - course_name/trip_start/trip_end/proc_id는 모두 비워서(NULL) 저장하고,
+    사용자가 나중에 CourseSetup 등에서 직접 채워 넣게 한다."""
+    user_id = current_user.id
+
+    source_course = supabase.table("course")\
+        .select("*")\
+        .eq("course_id", course_id)\
+        .eq("visibility", "public")\
+        .execute()
+    if not source_course.data:
+        raise HTTPException(status_code=404, detail="공개된 코스를 찾을 수 없습니다")
+
+    source = source_course.data[0]
+
+    # root_course_id: 복사가 여러 번 이어져도(복사한 걸 또 복사) 항상 최초 원본을
+    # 가리키도록, source에 이미 root_course_id가 있으면 그걸 그대로 물려받고
+    # 없으면(source 자신이 원본) source의 course_id를 root으로 삼는다.
+    root_course_id = source.get("root_course_id") or source["course_id"]
+
+    new_course = supabase.table("course").insert({
+        "user_id": user_id,
+        "course_name": None,
+        "trip_start": None,
+        "trip_end": None,
+        "proc_id": None,
+        "status": "DRAFT",
+        "visibility": "private",
+        "source_course_id": course_id,
+        "root_course_id": root_course_id,
+    }).execute()
+
+    new_course_id = new_course.data[0]["course_id"]
+
+    source_details = supabase.table("course_detail")\
+        .select("tour_id, day, visit_order")\
+        .eq("course_id", course_id)\
+        .execute()
+
+    if source_details.data:
+        rows = [
+            {
+                "course_id": new_course_id,
+                "tour_id": d["tour_id"],
+                "day": d["day"],
+                "visit_order": d["visit_order"],
+            }
+            for d in source_details.data
+        ]
+        supabase.table("course_detail").insert(rows).execute()
+
+    return new_course.data[0]
+
 @router.patch("/api/courses/{course_id}/publish")
 def publish_course(course_id: int, current_user = Depends(get_current_user)):
     from datetime import datetime, timezone
