@@ -6,6 +6,11 @@ router = APIRouter()
 HARD_FILTER_SENSITIVITY = 1.0
 HARD_FILTER_EXPOSURE_THRESHOLD = 0.7
 SOFT_SCORE_CAP = 60
+# 하드 필터(민감도·노출도 모두 임계값 이상) 조건을 만족하면 계산을 건너뛰고 이 값을
+# 그대로 반환한다. 100은 "확실성"을 의미하는 것처럼 보일 수 있어 99로 낮춘다(팀 결정) -
+# 일반 계산 경로(SOFT_SCORE_CAP=60)와는 별개로, 이 값은 risk_status="not_recommended"를
+# 직접 반환하는 이 분기에서만 쓰인다.
+HARD_FILTER_RISK_PERCENT = 99
 
 
 def get_risk_status(percent):
@@ -25,9 +30,9 @@ def calc_risk(proc_tags, tourist_tags):
         exposure = float(tourist_tags.get(pt["after_caut_tag_id"], 0))
         if sensitivity >= HARD_FILTER_SENSITIVITY and exposure >= HARD_FILTER_EXPOSURE_THRESHOLD:
             return {
-                "risk_percent": 100,
+                "risk_percent": HARD_FILTER_RISK_PERCENT,
                 "risk_status": "not_recommended",
-                "top_tags": [{"after_caut_tag_id": pt["after_caut_tag_id"], "contribution": 100}],
+                "top_tags": [{"after_caut_tag_id": pt["after_caut_tag_id"], "contribution": HARD_FILTER_RISK_PERCENT}],
             }
 
     total_weight = sum(float(pt["sensitivity_score"]) for pt in proc_tags)
