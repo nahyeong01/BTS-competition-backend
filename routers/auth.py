@@ -152,6 +152,17 @@ def delete_my_account(current_user = Depends(get_current_user)):
     # profiles 삭제
     supabase.table("profiles").delete().eq("user_id", user_id).execute()
 
+    # 이 유저가 "신고자"로서 남을 신고한 기록(course_report.reporter_user_id)은
+    # 완전히 지우지 않고 신고자 식별자만 익명화한다 - 신고 자체(어떤 코스가 어떤
+    # 사유로 신고됐는지)는 운영 기록으로 계속 남기되, 탈퇴한 유저의 활동 흔적은
+    # 남기지 않는다. reporter_user_id는 원래 NOT NULL이었으나 이 처리를 위해
+    # nullable로 스키마 변경했다(2026-08-26). 위 own_course_ids 처리(내 코스가
+    # 신고당한 기록 삭제)와는 반대 방향 - 그건 course_id 쪽 FK 때문에 반드시
+    # 지워야만 했던 것이고, 이건 reporter_user_id 쪽 FK 때문에 auth.users 삭제
+    # 전에 반드시 정리해야 하는 것이다. auth.users 삭제보다 반드시 먼저 실행해야
+    # 그 삭제가 FK 위반으로 막히지 않는다.
+    supabase.table("course_report").update({"reporter_user_id": None}).eq("reporter_user_id", user_id).execute()
+
     # Supabase Auth 계정 자체 삭제 - service_role(Secret key) 클라이언트로만 가능
     try:
         supabase_admin.auth.admin.delete_user(user_id)
