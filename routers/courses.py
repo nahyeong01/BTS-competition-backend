@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from database import supabase
-from auth import get_current_user
+from auth import get_current_user, get_current_user_optional
 
 router = APIRouter()
 
@@ -191,7 +191,7 @@ def get_shared_courses():
     ]
 
 @router.get("/api/shared-courses/{course_id}")
-def get_shared_course_detail(course_id: int):
+def get_shared_course_detail(course_id: int, current_user = Depends(get_current_user_optional)):
     """공개된(visibility=public) 코스라면, 작성자 본인이 아니어도 상세(Day별 관광지
     목록 + 작성자 닉네임)를 조회할 수 있다. get_course()와 달리 user_id로 필터링하지
     않는다 - "다른 사람이 만든 추천코스"를 보는 화면이 이 엔드포인트를 쓴다.
@@ -200,7 +200,15 @@ def get_shared_course_detail(course_id: int):
     visibility/status/updated_at까지 응답에 그대로 실려 나갔다(프론트는 이 필드들을
     쓰지 않음이 확인됨, 2026-08-26 백엔드 검토). 필요한 컬럼만 select하고, 최종
     응답도 명시적으로 필드를 골라 구성한다 - copy 엔드포인트는 이 응답 구조를 가져다
-    쓰지 않고 DB를 직접 재조회하므로 이 변경과 무관하다."""
+    쓰지 않고 DB를 직접 재조회하므로 이 변경과 무관하다.
+
+    is_owner: raw user_id를 응답에서 제거한 뒤(위 데이터 최소화), 프론트의 "내가 만든
+    공유 코스인지" 판정(신고 버튼 숨김, 찜하기/코스 저장 버튼 숨김 등)이 깨지는 회귀가
+    발견되어(2026-08-26, 민지 확인) 대신 이 boolean 하나만 내려준다. 비로그인 조회도
+    허용해야 하므로 get_current_user_optional을 쓴다 - Authorization 헤더가 없으면
+    current_user가 None이라 is_owner는 그냥 False, 헤더가 있는데 형식 오류/만료/무효
+    토큰이면 get_current_user_optional이 자체적으로 401을 던진다(이 함수까지 도달하지
+    않음)."""
     course = supabase.table("course")\
         .select("course_id, course_name, user_id, source_course_id, root_course_id")\
         .eq("course_id", course_id)\
@@ -210,6 +218,7 @@ def get_shared_course_detail(course_id: int):
         raise HTTPException(status_code=404, detail="공개된 코스를 찾을 수 없습니다")
 
     course_row = course.data[0]
+    is_owner = bool(current_user and current_user.id == course_row["user_id"])
 
     details = supabase.table("course_detail")\
         .select("*")\
@@ -231,6 +240,7 @@ def get_shared_course_detail(course_id: int):
         "details": details.data,
         "source_course_id": course_row.get("source_course_id"),
         "root_course_id": course_row.get("root_course_id"),
+        "is_owner": is_owner,
     }
 
 @router.post("/api/shared-courses/{course_id}/copy")
