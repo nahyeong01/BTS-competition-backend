@@ -128,8 +128,13 @@ def add_course_details(
     # ==================== 공개 코스 ====================
 @router.get("/api/shared-courses")
 def get_shared_courses():
+    # 데이터 최소화: trip_start/trip_end는 프론트가 목록 카드에서 쓰지 않아 select
+    # 단계에서 아예 제외한다(2026-08-26 백엔드 검토 반영). user_id는 아래 nickname
+    # 매칭에 backend 내부적으로만 필요하고, 최종 응답에는 raw user_id 대신 nickname만
+    # 내려준다 - copy 엔드포인트(POST /api/shared-courses/{id}/copy)는 이 응답을 쓰지
+    # 않고 DB를 직접 재조회하므로 이 변경과 무관하다.
     response = supabase.table("course")\
-        .select("course_id, course_name, trip_start, trip_end, user_id, source_course_id, root_course_id, published_at, created_at")\
+        .select("course_id, course_name, user_id, source_course_id, root_course_id, published_at, created_at")\
         .eq("visibility", "public")\
         .order("published_at", desc=True)\
         .execute()
@@ -148,24 +153,39 @@ def get_shared_courses():
             .execute()
         nickname_by_user_id = {p["user_id"]: p["nickname"] for p in profiles_res.data}
 
-    for c in courses:
-        c["nickname"] = nickname_by_user_id.get(c["user_id"])
-    return courses
+    return [
+        {
+            "course_id": c["course_id"],
+            "course_name": c.get("course_name"),
+            "nickname": nickname_by_user_id.get(c["user_id"]),
+            "source_course_id": c.get("source_course_id"),
+            "root_course_id": c.get("root_course_id"),
+            "published_at": c.get("published_at"),
+            "created_at": c.get("created_at"),
+        }
+        for c in courses
+    ]
 
 @router.get("/api/shared-courses/{course_id}")
 def get_shared_course_detail(course_id: int):
     """공개된(visibility=public) 코스라면, 작성자 본인이 아니어도 상세(Day별 관광지
     목록 + 작성자 닉네임)를 조회할 수 있다. get_course()와 달리 user_id로 필터링하지
-    않는다 - "다른 사람이 만든 추천코스"를 보는 화면이 이 엔드포인트를 쓴다."""
+    않는다 - "다른 사람이 만든 추천코스"를 보는 화면이 이 엔드포인트를 쓴다.
+
+    데이터 최소화: 예전에는 .select("*")로 proc_id/trip_start/trip_end/raw user_id/
+    visibility/status/updated_at까지 응답에 그대로 실려 나갔다(프론트는 이 필드들을
+    쓰지 않음이 확인됨, 2026-08-26 백엔드 검토). 필요한 컬럼만 select하고, 최종
+    응답도 명시적으로 필드를 골라 구성한다 - copy 엔드포인트는 이 응답 구조를 가져다
+    쓰지 않고 DB를 직접 재조회하므로 이 변경과 무관하다."""
     course = supabase.table("course")\
-        .select("*")\
+        .select("course_id, course_name, user_id, source_course_id, root_course_id")\
         .eq("course_id", course_id)\
         .eq("visibility", "public")\
         .execute()
     if not course.data:
         raise HTTPException(status_code=404, detail="공개된 코스를 찾을 수 없습니다")
 
-    result = course.data[0]
+    course_row = course.data[0]
 
     details = supabase.table("course_detail")\
         .select("*")\
@@ -173,15 +193,21 @@ def get_shared_course_detail(course_id: int):
         .order("day")\
         .order("visit_order")\
         .execute()
-    result["details"] = details.data
 
     profile = supabase.table("profiles")\
         .select("nickname")\
-        .eq("user_id", result["user_id"])\
+        .eq("user_id", course_row["user_id"])\
         .execute()
-    result["nickname"] = profile.data[0]["nickname"] if profile.data else None
+    nickname = profile.data[0]["nickname"] if profile.data else None
 
-    return result
+    return {
+        "course_id": course_row["course_id"],
+        "course_name": course_row.get("course_name"),
+        "nickname": nickname,
+        "details": details.data,
+        "source_course_id": course_row.get("source_course_id"),
+        "root_course_id": course_row.get("root_course_id"),
+    }
 
 @router.post("/api/shared-courses/{course_id}/copy")
 def copy_shared_course(course_id: int, current_user = Depends(get_current_user)):
