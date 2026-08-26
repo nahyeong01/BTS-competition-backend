@@ -88,6 +88,30 @@ def update_course(
 @router.delete("/api/courses/{course_id}")
 def delete_course(course_id: int, current_user = Depends(get_current_user)):
     user_id = current_user.id
+
+    # 소유자 확인을 먼저 한다 - 아래 참조 정리(다른 유저 코스의 source/root NULL 처리,
+    # course_report 삭제)는 course_id만으로 동작하므로, 소유권 확인 없이 먼저 실행하면
+    # 남의 코스에 대해서도 부수효과가 발생한다(실제 course 삭제는 .eq("user_id", ...)로
+    # 막히지만, 그 전에 이미 참조가 끊기고 신고 기록이 지워져버린다).
+    course = supabase.table("course").select("course_id").eq("course_id", course_id).eq("user_id", user_id).execute()
+    if not course.data:
+        raise HTTPException(status_code=404, detail="코스를 찾을 수 없습니다")
+
+    # 이 코스를 다른 유저가 복사해갔다면(source_course_id/root_course_id로 이 코스를
+    # 참조) DB가 fk_course_source_course/fk_course_root_course의 ON DELETE SET NULL로
+    # course 삭제 시 그 참조를 자동으로 NULL 처리한다(2026-08-26 스키마 변경, 민지 확인).
+    # 아래 두 update는 그 DB 안전장치의 애플리케이션 레벨 이중 방어다 - 없어도 DB가
+    # 처리하지만, 남겨둬도 이미 NULL인 값을 다시 NULL로 쓰는 것뿐이라 해롭지 않고
+    # 코드만 보고도 이 삭제가 참조 정리를 고려했다는 의도가 드러난다.
+    supabase.table("course").update({"source_course_id": None}).eq("source_course_id", course_id).execute()
+    supabase.table("course").update({"root_course_id": None}).eq("root_course_id", course_id).execute()
+    # course_report는 SET NULL 대상이 아니다 - 신고 기록은 "유지"가 아니라 "삭제"가
+    # 정책이므로(course_id가 사라지는 코스에 대한 신고는 의미가 없음) 이건 DB 제약과
+    # 무관하게 계속 코드에서 직접 지워야 한다. course_report도 이 코스를 course_id로
+    # 참조하므로(fk_course_report_course, ON DELETE NO ACTION - 변경 안 함), 신고 기록이
+    # 있으면 어차피 course 삭제가 막힌다.
+    supabase.table("course_report").delete().eq("course_id", course_id).execute()
+
     supabase.table("course")\
         .delete()\
         .eq("course_id", course_id)\
