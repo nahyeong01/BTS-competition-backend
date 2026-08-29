@@ -12,6 +12,25 @@ SOFT_SCORE_CAP = 60
 # 직접 반환하는 이 분기에서만 쓰인다.
 HARD_FILTER_RISK_PERCENT = 99
 
+# Supabase(PostgREST) 클라이언트는 단일 .execute() 호출당 기본 1000행으로 응답을 자른다
+# (테이블 전체 select 시 흔히 걸리는 제한). 이 페이지 크기로 range를 반복 호출해 결과가
+# page_size보다 작아질 때까지(=마지막 페이지) 계속 모은다.
+SUPABASE_PAGE_SIZE = 1000
+
+
+def _fetch_all_rows(table_name):
+    """table_name의 전체 행을 페이지네이션으로 빠짐없이 가져온다."""
+    all_rows = []
+    start = 0
+    while True:
+        res = supabase.table(table_name).select("*").range(start, start + SUPABASE_PAGE_SIZE - 1).execute()
+        rows = res.data
+        all_rows.extend(rows)
+        if len(rows) < SUPABASE_PAGE_SIZE:
+            break
+        start += SUPABASE_PAGE_SIZE
+    return all_rows
+
 
 def get_risk_status(percent):
     if percent < 25:
@@ -75,9 +94,14 @@ def get_all_tourist_spots_risk(proc_id: str = Query(...)):
     if not proc_tags:
         raise HTTPException(status_code=404, detail="해당 시술의 주의태그 정보가 없습니다")
 
-    tourist_tag_res = supabase.table("tourist_tag").select("*").execute()
+    # tourist_tag는 관광지 783개 x 태그 7종 = 총 5,474행이라 단일 .execute()로는
+    # Supabase 기본 1000행 제한에 걸려 앞쪽 143개 관광지분(143*7=1001행)에서 잘린 채
+    # 반환되고 있었다(2026-08-29 확인 - production risk API가 시술 종류와 무관하게
+    # 항상 정확히 143개 관광지만 반환하던 원인). _fetch_all_rows로 range 페이지네이션을
+    # 적용해 5,474행을 빠짐없이 가져온다. 이 함수 아래의 계산/응답 구조는 그대로 둔다.
+    tourist_tag_rows = _fetch_all_rows("tourist_tag")
     tourist_tags_by_tour = {}
-    for row in tourist_tag_res.data:
+    for row in tourist_tag_rows:
         tourist_tags_by_tour.setdefault(row["tour_id"], {})[row["after_caut_tag_id"]] = row["exposure_score"]
 
     tag_name_res = supabase.table("after_caution_tag").select("*").execute()
@@ -101,6 +125,8 @@ def get_tourist_spot_risk(tour_id: int, proc_id: str = Query(...)):
     if not proc_tags:
         raise HTTPException(status_code=404, detail="해당 시술의 주의태그 정보가 없습니다")
 
+    # 단일 tour_id로 필터링되어 최대 7행(태그 종류 수)만 반환되므로 1000행 제한에
+    # 걸릴 일이 없다 - 여기는 페이지네이션 대상이 아니다.
     tourist_tag_res = supabase.table("tourist_tag").select("*").eq("tour_id", tour_id).execute()
     if not tourist_tag_res.data:
         raise HTTPException(status_code=404, detail="해당 관광지의 주의태그 정보가 없습니다")
