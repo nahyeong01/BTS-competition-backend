@@ -1,13 +1,37 @@
+import re
 from collections import Counter
 from fastapi import APIRouter, HTTPException
 from database import supabase
 
 router = APIRouter()
 
+# 한국관광공사(TourAPI) 원본 overview 텍스트에 <strong>, <br> 같은 HTML 태그가 섞여
+# 있는 경우가 있다(2026-08-29 확인, 북촌한옥마을 등). 프론트(TouristDetailScreen.js)는
+# 이 값을 그대로 <Text>에 렌더링하고 있어 태그 문자가 화면에 그대로 노출된다. BTS는
+# 굵게 표시 같은 HTML 스타일을 살릴 필요가 없으므로, 응답을 내려주기 전에 태그만
+# 제거해 일반 텍스트로 정제한다 - 프론트 코드/AAB를 건드리지 않고 백엔드 응답만
+# 정제하면 기존 배포본도 재배포 없이 정제된 값을 받는다.
+_HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+
+
+def _strip_html_tags(text):
+    if not isinstance(text, str) or not text:
+        return text
+    return _HTML_TAG_PATTERN.sub("", text)
+
+
+def _sanitize_spot(spot):
+    """관광지 원본 행에 overview 필드가 있으면 HTML 태그를 제거한다. select 컬럼에
+    애초에 overview가 없는 응답(예: get_popular_tourist_spots)에는 영향 없다."""
+    if "overview" in spot:
+        spot["overview"] = _strip_html_tags(spot["overview"])
+    return spot
+
+
 @router.get("/api/tourist-spots")
 def get_tourist_spots():
     response = supabase.table("tourist").select("*").execute()
-    return response.data
+    return [_sanitize_spot(spot) for spot in response.data]
 
 # recommendation_cache 테이블(score_a, rank_a)은 데이터가 없어서 당분간 미사용 상태로
 # 남겨둔다. 대신 tourist_wishlist를 실시간으로 집계해서 순위를 매긴다 - 관광지가 782개
@@ -56,4 +80,4 @@ def get_tourist_spot(tour_id: int):
         .execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="관광지를 찾을 수 없습니다")
-    return response.data[0]
+    return _sanitize_spot(response.data[0])
